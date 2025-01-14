@@ -82,7 +82,7 @@ fn choice(comptime parsers: anytype) Parser([]const u8) {
     }.func;
 }
 
-fn parseString(comptime literal: []const u8) Parser([]const u8) {
+fn stringParser(comptime literal: []const u8) Parser([]const u8) {
     const len = literal.len;
 
     return struct {
@@ -95,9 +95,6 @@ fn parseString(comptime literal: []const u8) Parser([]const u8) {
     }.func;
 }
 
-const delims = opt(all(choice(.{ parseString(" "), parseString("\n") })));
-const sign = opt(choice(.{ parseString("+"), parseString("-") }));
-
 fn parseDigit(str: []const u8) ?Parsed([]const u8) {
     if (str.len == 0) return null;
 
@@ -107,32 +104,58 @@ fn parseDigit(str: []const u8) ?Parsed([]const u8) {
         null;
 }
 
-fn parseNull(str: []const u8) ?Parsed(Json) {
-    _, const rest = parseString("null")(str) orelse return null;
+fn parseLiteral(str: []const u8) ?Parsed([]const u8) {
+    var parsed: usize = 0;
 
-    return .{ Json.JsonNull, rest };
+    for (str) |chr| {
+        if (chr == '"') break;
+        parsed += 1;
+    }
+
+    return if (parsed != 0) .{ str[0..parsed], str[parsed..] } else null;
 }
 
-fn parseBool(str: []const u8) ?Parsed(Json) {
-    const token, const rest = parseString("true")(str) orelse
-        parseString("false")(str) orelse
-        return null;
+const delims = opt(all(choice(.{ stringParser(" "), stringParser("\n") })));
+const sign = opt(choice(.{ stringParser("+"), stringParser("-") }));
 
-    return .{ Json{ .JsonBool = eql(u8, token, "true") }, rest };
-}
+pub const JsonLexer = struct {
+    fn parseNull(str: []const u8) ?Parsed(Json) {
+        _, const rest = stringParser("null")(str) orelse return null;
 
-fn parseNumber(str: []const u8) ?Parsed(Json) {
-    const token, const rest = chain(.{ sign, all(parseDigit) })(str) orelse return null;
+        return .{ Json.JsonNull, rest };
+    }
 
-    return .{ Json{ .JsonNumber = std.fmt.parseInt(i64, token, 0) catch return null }, rest };
-}
+    fn parseBool(str: []const u8) ?Parsed(Json) {
+        const token, const rest = stringParser("true")(str) orelse
+            stringParser("false")(str) orelse
+            return null;
 
-fn parseFloat(str: []const u8) ?Parsed(Json) {
-    const token, const rest = chain(.{ sign, all(parseDigit), parseString("."), all(parseDigit) })(str) orelse return null;
+        return .{ Json{ .JsonBool = eql(u8, token, "true") }, rest };
+    }
 
-    return .{ Json{ .JsonFloat = std.fmt.parseFloat(f64, token) catch return null }, rest };
-}
+    fn parseNumber(str: []const u8) ?Parsed(Json) {
+        const token, const rest = chain(.{ sign, all(parseDigit) })(str) orelse return null;
 
-pub fn parseJson(str: []const u8) ?Parsed(Json) {
-    return parseFloat(str) orelse parseNumber(str) orelse parseBool(str) orelse parseNull(str);
-}
+        return .{ Json{ .JsonNumber = std.fmt.parseInt(i64, token, 0) catch return null }, rest };
+    }
+
+    fn parseFloat(str: []const u8) ?Parsed(Json) {
+        const token, const rest = chain(.{ sign, all(parseDigit), stringParser("."), all(parseDigit) })(str) orelse return null;
+
+        return .{ Json{ .JsonFloat = std.fmt.parseFloat(f64, token) catch return null }, rest };
+    }
+
+    fn parseString(str: []const u8) ?Parsed(Json) {
+        var rest = str;
+
+        _, rest = stringParser("\"")(rest) orelse return null;
+        const token, rest = parseLiteral(rest) orelse return null;
+        _, rest = stringParser("\"")(rest) orelse return null;
+
+        return .{ Json{ .JsonString = token }, rest };
+    }
+
+    pub fn parseJson(str: []const u8) ?Parsed(Json) {
+        return parseString(str) orelse parseFloat(str) orelse parseNumber(str) orelse parseBool(str) orelse parseNull(str);
+    }
+};
