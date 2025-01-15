@@ -116,9 +116,12 @@ fn parseLiteral(str: []const u8) ?Parsed([]const u8) {
 }
 
 const delims = opt(all(choice(.{ stringParser(" "), stringParser("\n") })));
+const comma = chain(.{ delims, stringParser(","), delims });
 const sign = opt(choice(.{ stringParser("+"), stringParser("-") }));
 
 pub const JsonLexer = struct {
+    allocator: std.mem.Allocator,
+
     fn parseNull(str: []const u8) ?Parsed(Json) {
         _, const rest = stringParser("null")(str) orelse return null;
 
@@ -155,7 +158,34 @@ pub const JsonLexer = struct {
         return .{ Json{ .JsonString = token }, rest };
     }
 
-    pub fn parseJson(str: []const u8) ?Parsed(Json) {
-        return parseString(str) orelse parseFloat(str) orelse parseNumber(str) orelse parseBool(str) orelse parseNull(str);
+    fn parseArray(self: @This(), str: []const u8) ?Parsed(Json) {
+        var value = std.ArrayList(Json).init(self.allocator);
+
+        var rest = str;
+
+        _, rest = chain(.{ delims, stringParser("["), delims })(rest) orelse {
+            value.deinit();
+            return null;
+        };
+
+        while (self.parseJson(rest)) |parsed| {
+            const token, rest = parsed;
+            value.append(token) catch unreachable;
+
+            _, rest = comma(rest) orelse break;
+        }
+
+        _, rest = chain(.{ delims, stringParser("]"), delims })(rest) orelse {
+            value.deinit();
+            return null;
+        };
+
+        return .{ Json{ .JsonArray = value }, rest };
+    }
+
+    fn parseObject(str: []const u8) ?Parsed(Json) {}
+
+    pub fn parseJson(self: @This(), str: []const u8) ?Parsed(Json) {
+        return self.parseArray(str) orelse parseString(str) orelse parseFloat(str) orelse parseNumber(str) orelse parseBool(str) orelse parseNull(str);
     }
 };
