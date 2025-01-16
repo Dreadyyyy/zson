@@ -183,9 +183,43 @@ pub const JsonLexer = struct {
         return .{ Json{ .JsonArray = value }, rest };
     }
 
-    fn parseObject(str: []const u8) ?Parsed(Json) {}
+    fn parseObject(self: @This(), str: []const u8) ?Parsed(Json) {
+        var value = std.StringHashMap(Json).init(self.allocator);
+
+        var rest = str;
+
+        _, rest = chain(.{ delims, stringParser("{"), delims })(rest) orelse {
+            value.deinit();
+            return null;
+        };
+
+        while (parseString(rest)) |parsed| {
+            const key, rest = parsed;
+
+            _, rest = chain(.{ delims, stringParser(":"), delims })(rest) orelse {
+                value.deinit();
+                return null;
+            };
+
+            const val, rest = self.parseJson(rest) orelse {
+                value.deinit();
+                return null;
+            };
+
+            value.put(key.JsonString, val) catch unreachable;
+
+            _, rest = comma(rest) orelse break;
+        }
+
+        _, rest = chain(.{ delims, stringParser("}"), delims })(rest) orelse {
+            value.deinit();
+            return null;
+        };
+
+        return .{ Json{ .JsonObject = value }, rest };
+    }
 
     pub fn parseJson(self: @This(), str: []const u8) ?Parsed(Json) {
-        return self.parseArray(str) orelse parseString(str) orelse parseFloat(str) orelse parseNumber(str) orelse parseBool(str) orelse parseNull(str);
+        return self.parseObject(str) orelse self.parseArray(str) orelse parseString(str) orelse parseFloat(str) orelse parseNumber(str) orelse parseBool(str) orelse parseNull(str);
     }
 };

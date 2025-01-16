@@ -104,3 +104,21 @@ test "test parseArray" {
 
     try testing.expectEqualDeep(null, lexer.parseJson(c));
 }
+
+test "test parseObject" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const lexer = JsonLexer{ .allocator = arena.allocator() };
+
+    const a = " { \"foo\": \"bar\"  , \"bar\"  :null}rest";
+    const b = "not an object";
+
+    const object_a, const rest_a = lexer.parseJson(a).?;
+    try testing.expectEqualDeep("rest", rest_a);
+    try testing.expectEqualDeep("JsonObject", @tagName(object_a));
+    try testing.expectEqualDeep(Json{ .JsonString = "bar" }, object_a.JsonObject.get("foo").?);
+    try testing.expectEqualDeep(Json.JsonNull, object_a.JsonObject.get("bar").?);
+
+    try testing.expectEqualDeep(null, lexer.parseJson(b));
+}
