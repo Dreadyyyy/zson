@@ -115,10 +115,23 @@ test "test parseObject" {
     const b = "not an object";
 
     const object_a, const rest_a = lexer.parseJson(a).?;
+    std.debug.print("{s}\n", .{(try object_a.toStr(arena.allocator())).items});
     try testing.expectEqualDeep("rest", rest_a);
     try testing.expectEqualDeep("JsonObject", @tagName(object_a));
     try testing.expectEqualDeep(Json{ .JsonString = "bar" }, object_a.JsonObject.get("foo").?);
     try testing.expectEqualDeep(Json.JsonNull, object_a.JsonObject.get("bar").?);
 
     try testing.expectEqualDeep(null, lexer.parseJson(b));
+}
+
+test "prints" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const lexer = JsonLexer{ .allocator = arena.allocator() };
+
+    const a = "{ \"foo\":{ \"bar\" : [null, 123, 456.789 ]}, \"bar\"  : \"abc\", \"fizz\":[]}";
+
+    const object_a, _ = lexer.parseJson(a).?;
+    std.debug.print("{s}\n", .{(try object_a.toStr(arena.allocator())).items});
 }

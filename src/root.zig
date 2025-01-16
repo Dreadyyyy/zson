@@ -9,6 +9,72 @@ pub const Json = union(enum) {
     JsonString: []const u8,
     JsonArray: std.ArrayList(Json),
     JsonObject: std.StringHashMap(Json),
+
+    pub fn toStr(self: *const @This(), allocator: std.mem.Allocator) !std.ArrayList(u8) {
+        var res = std.ArrayList(u8).init(allocator);
+        errdefer res.deinit();
+
+        switch (self.*) {
+            .JsonNull => try res.appendSlice("null"),
+            inline .JsonBool, .JsonNumber, .JsonFloat => |val| {
+                const slice = try std.fmt.allocPrint(allocator, "{}", .{val});
+                defer allocator.free(slice);
+                try res.appendSlice(slice);
+            },
+            .JsonString => |str| try res.appendSlice(str),
+            .JsonArray => |arr| {
+                try res.append('[');
+
+                for (arr.items, 0..) |el, idx| {
+                    try res.append(' ');
+
+                    const str = try el.toStr(allocator);
+                    defer str.deinit();
+                    try res.appendSlice(str.items);
+
+                    try res.append(if (idx != arr.items.len - 1) ',' else ' ');
+                }
+
+                try res.append(']');
+            },
+            .JsonObject => |obj| {
+                try res.append('{');
+
+                var iter = obj.iterator();
+                var idx: usize = 0;
+                const size = obj.count();
+
+                while (iter.next()) |pair| {
+                    const left = try std.fmt.allocPrint(allocator, " \"{s}\":", .{pair.key_ptr.*});
+                    defer allocator.free(left);
+                    try res.appendSlice(left);
+
+                    const right = try pair.value_ptr.toStr(allocator);
+                    defer right.deinit();
+                    try res.appendSlice(right.items);
+
+                    try res.append(if (idx != size - 1) ',' else ' ');
+                    idx += 1;
+                }
+
+                try res.append('}');
+            },
+        }
+
+        return res;
+    }
+
+    pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            // .JsonString => |str| allocator.free(str),
+            .JsonArray => |arr| for (arr.items) |el| el.deinit(allocator),
+            .JsonObject => |obj| {
+                var iter = obj.iterator();
+                while (iter.next()) |pair| pair.value_ptr.deinit(allocator);
+            },
+            else => {},
+        }
+    }
 };
 
 fn Parsed(comptime T: type) type {
@@ -152,7 +218,7 @@ pub const JsonLexer = struct {
         var rest = str;
 
         _, rest = stringParser("\"")(rest) orelse return null;
-        const token, rest = parseLiteral(rest) orelse return null;
+        const token, rest = opt(parseLiteral)(rest).?;
         _, rest = stringParser("\"")(rest) orelse return null;
 
         return .{ Json{ .JsonString = token }, rest };
