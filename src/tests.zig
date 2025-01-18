@@ -3,6 +3,7 @@ const testing = std.testing;
 
 const JsonLexer = @import("root.zig").JsonLexer;
 const Json = @import("root.zig").Json;
+const ParseError = @import("root.zig").ParseError;
 
 test "test parseNull" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -13,8 +14,8 @@ test "test parseNull" {
     const a = "nullabc";
     const b = "not null";
 
-    try testing.expectEqualDeep(.{ .JsonNull, "abc" }, lexer.parseJson(a).?);
-    try testing.expectEqualDeep(null, lexer.parseJson(b));
+    try testing.expectEqualDeep(.{ .JsonNull, "abc" }, try lexer.parseJson(a));
+    try testing.expectError(ParseError.UnexpectedToken, lexer.parseJson(b));
 }
 
 test "test parseBool" {
@@ -27,9 +28,9 @@ test "test parseBool" {
     const b = "false";
     const c = "not bool";
 
-    try testing.expectEqualDeep(.{ Json{ .JsonBool = true }, "e" }, lexer.parseJson(a).?);
-    try testing.expectEqualDeep(.{ Json{ .JsonBool = false }, "" }, lexer.parseJson(b).?);
-    try testing.expectEqualDeep(null, lexer.parseJson(c));
+    try testing.expectEqualDeep(.{ Json{ .JsonBool = true }, "e" }, try lexer.parseJson(a));
+    try testing.expectEqualDeep(.{ Json{ .JsonBool = false }, "" }, try lexer.parseJson(b));
+    try testing.expectError(ParseError.UnexpectedToken, lexer.parseJson(c));
 }
 
 test "test parseNumber" {
@@ -43,10 +44,10 @@ test "test parseNumber" {
     const c = "25234523a";
     const d = "not a number";
 
-    try testing.expectEqualDeep(.{ Json{ .JsonNumber = -52345235 }, "" }, lexer.parseJson(a).?);
-    try testing.expectEqualDeep(.{ Json{ .JsonNumber = 25234523 }, "" }, lexer.parseJson(b).?);
-    try testing.expectEqualDeep(.{ Json{ .JsonNumber = 25234523 }, "a" }, lexer.parseJson(c).?);
-    try testing.expectEqualDeep(null, lexer.parseJson(d));
+    try testing.expectEqualDeep(.{ Json{ .JsonNumber = -52345235 }, "" }, try lexer.parseJson(a));
+    try testing.expectEqualDeep(.{ Json{ .JsonNumber = 25234523 }, "" }, try lexer.parseJson(b));
+    try testing.expectEqualDeep(.{ Json{ .JsonNumber = 25234523 }, "a" }, try lexer.parseJson(c));
+    try testing.expectError(ParseError.UnexpectedToken, lexer.parseJson(d));
 }
 
 test "test parseFloat" {
@@ -60,10 +61,10 @@ test "test parseFloat" {
     const c = "25234.523a";
     const d = "not a number";
 
-    try testing.expectEqualDeep(.{ Json{ .JsonFloat = -5234.5235 }, "" }, lexer.parseJson(a).?);
-    try testing.expectEqualDeep(.{ Json{ .JsonFloat = 25234.523 }, "" }, lexer.parseJson(b).?);
-    try testing.expectEqualDeep(.{ Json{ .JsonFloat = 25234.523 }, "a" }, lexer.parseJson(c).?);
-    try testing.expectEqualDeep(null, lexer.parseJson(d));
+    try testing.expectEqualDeep(.{ Json{ .JsonFloat = -5234.5235 }, "" }, try lexer.parseJson(a));
+    try testing.expectEqualDeep(.{ Json{ .JsonFloat = 25234.523 }, "" }, try lexer.parseJson(b));
+    try testing.expectEqualDeep(.{ Json{ .JsonFloat = 25234.523 }, "a" }, try lexer.parseJson(c));
+    try testing.expectError(ParseError.UnexpectedToken, lexer.parseJson(d));
 }
 
 test "test parseString" {
@@ -75,8 +76,8 @@ test "test parseString" {
     const a = "\"foobar\"rest";
     const b = "not a literal";
 
-    try testing.expectEqualDeep(.{ Json{ .JsonString = "foobar" }, "rest" }, lexer.parseJson(a).?);
-    try testing.expectEqualDeep(null, lexer.parseJson(b));
+    try testing.expectEqualDeep(.{ Json{ .JsonString = "foobar" }, "rest" }, try lexer.parseJson(a));
+    try testing.expectError(ParseError.UnexpectedToken, lexer.parseJson(b));
 }
 
 test "test parseArray" {
@@ -89,7 +90,7 @@ test "test parseArray" {
     const b = "[]";
     const c = "not an array";
 
-    const array_a, const rest_a = lexer.parseJson(a).?;
+    const array_a, const rest_a = try lexer.parseJson(a);
     try testing.expectEqualDeep(rest_a, "abc");
     try testing.expectEqualDeep(@tagName(array_a), "JsonArray");
     try testing.expectEqualDeep(array_a.JsonArray.items.len, 3);
@@ -97,12 +98,12 @@ test "test parseArray" {
     try testing.expectEqualDeep(array_a.JsonArray.items[1], Json{ .JsonNumber = 123 });
     try testing.expectEqualDeep(array_a.JsonArray.items[2], Json{ .JsonString = "foobar" });
 
-    const array_b, const rest_b = lexer.parseJson(b).?;
+    const array_b, const rest_b = try lexer.parseJson(b);
     try testing.expectEqualDeep(rest_b, "");
     try testing.expectEqualDeep(@tagName(array_b), "JsonArray");
     try testing.expectEqualDeep(array_b.JsonArray.items.len, 0);
 
-    try testing.expectEqualDeep(null, lexer.parseJson(c));
+    try testing.expectError(ParseError.UnexpectedToken, lexer.parseJson(c));
 }
 
 test "test parseObject" {
@@ -114,24 +115,23 @@ test "test parseObject" {
     const a = " { \"foo\": \"bar\"  , \"bar\"  :null}rest";
     const b = "not an object";
 
-    const object_a, const rest_a = lexer.parseJson(a).?;
-    std.debug.print("{s}\n", .{(try object_a.toStr(arena.allocator())).items});
+    const object_a, const rest_a = try lexer.parseJson(a);
     try testing.expectEqualDeep("rest", rest_a);
     try testing.expectEqualDeep("JsonObject", @tagName(object_a));
     try testing.expectEqualDeep(Json{ .JsonString = "bar" }, object_a.JsonObject.get("foo").?);
     try testing.expectEqualDeep(Json.JsonNull, object_a.JsonObject.get("bar").?);
 
-    try testing.expectEqualDeep(null, lexer.parseJson(b));
+    try testing.expectError(ParseError.UnexpectedToken, lexer.parseJson(b));
 }
 
-test "prints" {
+test "toStr" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
     const lexer = JsonLexer{ .allocator = arena.allocator() };
 
-    const a = "{ \"foo\":{ \"bar\" : [null, 123, 456.789 ]}, \"bar\"  : \"abc\", \"fizz\":[]}";
+    const a = "{ \"foo\":{ \"bar\" : [null, 123, 456.789 ]}, \"bar\"  : \"abc\", \"fizz\":[], \"\":[{},true,false,]}";
 
-    const object_a, _ = lexer.parseJson(a).?;
+    const object_a, _ = try lexer.parseJson(a);
     std.debug.print("{s}\n", .{(try object_a.toStr(arena.allocator())).items});
 }
