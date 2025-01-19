@@ -63,11 +63,14 @@ pub const Json = union(enum) {
         return res;
     }
 
-    pub fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         switch (self.*) {
-            // .JsonString => |str| allocator.free(str),
-            .JsonArray => |arr| for (arr.items) |el| el.deinit(allocator),
+            .JsonArray => |arr| {
+                defer arr.deinit();
+                for (0..arr.items.len) |idx| arr.items[idx].deinit(allocator);
+            },
             .JsonObject => |obj| {
+                defer self.JsonObject.deinit();
                 var iter = obj.iterator();
                 while (iter.next()) |pair| pair.value_ptr.deinit(allocator);
             },
@@ -78,6 +81,7 @@ pub const Json = union(enum) {
 
 pub const ParseError = error{
     UnexpectedToken,
+    Overflow,
     MemoryError,
 };
 
@@ -168,62 +172,49 @@ fn parseDigit(str: []const u8) ParseError!Parsed([]const u8) {
 }
 
 fn parseLiteral(str: []const u8) ParseError!Parsed([]const u8) {
-    var parsed: usize = 0;
+    if (str.len == 0 or str[0] != '"') return ParseError.UnexpectedToken;
 
-    for (str) |chr| {
-        if (chr == '"') break;
-        parsed += 1;
-    }
+    for (str[0 .. str.len - 1], str[1..], 1..) |chr1, chr2, idx|
+        if (chr2 == '"' and chr1 != '\\') return .{ str[1..idx], str[idx + 1 ..] };
 
-    return if (parsed != 0) .{ str[0..parsed], str[parsed..] } else ParseError.UnexpectedToken;
+    return ParseError.UnexpectedToken;
 }
 
 const delims = opt(all(choice(.{ stringParser(" "), stringParser("\n") })));
 const comma = chain(.{ delims, stringParser(","), delims });
 const sign = opt(choice(.{ stringParser("+"), stringParser("-") }));
 
-pub const JsonLexer = struct {
+pub const JsonParser = struct {
     allocator: std.mem.Allocator,
 
     fn parseNull(str: []const u8) ParseError!Parsed(Json) {
         _, const rest = try stringParser("null")(str);
-
         return .{ Json.JsonNull, rest };
     }
 
     fn parseBool(str: []const u8) ParseError!Parsed(Json) {
         const token, const rest = try choice(.{ stringParser("true"), stringParser("false") })(str);
-
         return .{ Json{ .JsonBool = std.mem.eql(u8, token, "true") }, rest };
     }
 
     fn parseNumber(str: []const u8) ParseError!Parsed(Json) {
         const token, const rest = try chain(.{ sign, all(parseDigit) })(str);
-
-        // TODO : check if parseInt throws error when overflow occurs
-        return .{ Json{ .JsonNumber = std.fmt.parseInt(i64, token, 0) catch unreachable }, rest };
+        return .{ Json{ .JsonNumber = std.fmt.parseInt(i64, token, 0) catch return ParseError.Overflow }, rest };
     }
 
     fn parseFloat(str: []const u8) ParseError!Parsed(Json) {
         const token, const rest = try chain(.{ sign, all(parseDigit), stringParser("."), all(parseDigit) })(str);
-
-        // TODO : check if parseFloat throws error when overflow occurs
-        return .{ Json{ .JsonFloat = std.fmt.parseFloat(f64, token) catch unreachable }, rest };
+        return .{ Json{ .JsonFloat = std.fmt.parseFloat(f64, token) catch return ParseError.Overflow }, rest };
     }
 
     fn parseString(str: []const u8) ParseError!Parsed(Json) {
-        var rest = str;
-
-        _, rest = try stringParser("\"")(rest);
-        const token, rest = opt(parseLiteral)(rest) catch unreachable;
-        _, rest = try stringParser("\"")(rest);
-
+        const token, const rest = try parseLiteral(str);
         return .{ Json{ .JsonString = token }, rest };
     }
 
-    fn parseArray(self: @This(), str: []const u8) ParseError!Parsed(Json) {
-        var value = std.ArrayList(Json).init(self.allocator);
-        errdefer value.deinit();
+    fn parseArray(self: *const @This(), str: []const u8) ParseError!Parsed(Json) {
+        var arr = std.ArrayList(Json).init(self.allocator);
+        errdefer arr.deinit();
 
         var rest = str;
 
@@ -231,44 +222,42 @@ pub const JsonLexer = struct {
 
         while (true) {
             const token, rest = self.parseJson(rest) catch break;
-            value.append(token) catch return ParseError.MemoryError;
+            arr.append(token) catch return ParseError.MemoryError;
 
             _, rest = comma(rest) catch break;
         }
 
         _, rest = try chain(.{ delims, stringParser("]"), delims })(rest);
 
-        return .{ Json{ .JsonArray = value }, rest };
+        return .{ Json{ .JsonArray = arr }, rest };
     }
 
-    fn parseObject(self: @This(), str: []const u8) ParseError!Parsed(Json) {
-        var value = std.StringHashMap(Json).init(self.allocator);
-        errdefer value.deinit();
+    fn parseObject(self: *const @This(), str: []const u8) ParseError!Parsed(Json) {
+        var obj = std.StringHashMap(Json).init(self.allocator);
+        errdefer obj.deinit();
 
         var rest = str;
 
         _, rest = try chain(.{ delims, stringParser("{"), delims })(rest);
 
         while (true) {
-            const key, rest = parseString(rest) catch break;
-
+            const key, rest = parseLiteral(rest) catch break;
             _, rest = try chain(.{ delims, stringParser(":"), delims })(rest);
-
             const val, rest = try self.parseJson(rest);
 
-            value.put(key.JsonString, val) catch return ParseError.MemoryError;
+            obj.put(key, val) catch return ParseError.MemoryError;
 
             _, rest = comma(rest) catch break;
         }
 
         _, rest = try chain(.{ delims, stringParser("}"), delims })(rest);
 
-        return .{ Json{ .JsonObject = value }, rest };
+        return .{ Json{ .JsonObject = obj }, rest };
     }
 
     pub fn parseJson(self: *const @This(), str: []const u8) ParseError!Parsed(Json) {
-        return self.parseObject(str) catch
-            self.parseArray(str) catch
+        return parseObject(self, str) catch
+            parseArray(self, str) catch
             parseString(str) catch
             parseFloat(str) catch
             parseNumber(str) catch

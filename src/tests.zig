@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-const JsonLexer = @import("root.zig").JsonLexer;
+const JsonParser = @import("root.zig").JsonParser;
 const Json = @import("root.zig").Json;
 const ParseError = @import("root.zig").ParseError;
 
@@ -9,7 +9,7 @@ test "test parseNull" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const lexer = JsonLexer{ .allocator = arena.allocator() };
+    const lexer = JsonParser{ .allocator = arena.allocator() };
 
     const a = "nullabc";
     const b = "not null";
@@ -22,7 +22,7 @@ test "test parseBool" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const lexer = JsonLexer{ .allocator = arena.allocator() };
+    const lexer = JsonParser{ .allocator = arena.allocator() };
 
     const a = "truee";
     const b = "false";
@@ -37,7 +37,7 @@ test "test parseNumber" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const lexer = JsonLexer{ .allocator = arena.allocator() };
+    const lexer = JsonParser{ .allocator = arena.allocator() };
 
     const a = "-52345235";
     const b = "+25234523";
@@ -54,7 +54,7 @@ test "test parseFloat" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const lexer = JsonLexer{ .allocator = arena.allocator() };
+    const lexer = JsonParser{ .allocator = arena.allocator() };
 
     const a = "-5234.5235";
     const b = "+25234.523";
@@ -71,7 +71,7 @@ test "test parseString" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const lexer = JsonLexer{ .allocator = arena.allocator() };
+    const lexer = JsonParser{ .allocator = arena.allocator() };
 
     const a = "\"foobar\"rest";
     const b = "not a literal";
@@ -84,7 +84,7 @@ test "test parseArray" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const lexer = JsonLexer{ .allocator = arena.allocator() };
+    const lexer = JsonParser{ .allocator = arena.allocator() };
 
     const a = "  [ null, 123, \"foobar\" ]abc";
     const b = "[]";
@@ -107,15 +107,14 @@ test "test parseArray" {
 }
 
 test "test parseObject" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-
-    const lexer = JsonLexer{ .allocator = arena.allocator() };
+    const lexer = JsonParser{ .allocator = testing.allocator };
 
     const a = " { \"foo\": \"bar\"  , \"bar\"  :null}rest";
     const b = "not an object";
 
-    const object_a, const rest_a = try lexer.parseJson(a);
+    var object_a, const rest_a = try lexer.parseJson(a);
+    defer object_a.deinit(testing.allocator);
+
     try testing.expectEqualDeep("rest", rest_a);
     try testing.expectEqualDeep("JsonObject", @tagName(object_a));
     try testing.expectEqualDeep(Json{ .JsonString = "bar" }, object_a.JsonObject.get("foo").?);
@@ -128,7 +127,7 @@ test "toStr" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const lexer = JsonLexer{ .allocator = arena.allocator() };
+    const lexer = JsonParser{ .allocator = arena.allocator() };
 
     const a = "{ \"foo\":{ \"bar\" : [null, 123, 456.789 ]}, \"bar\"  : \"abc\", \"fizz\":[], \"\":[{},true,false,]}";
 
