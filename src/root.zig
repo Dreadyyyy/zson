@@ -50,7 +50,7 @@ fn Parser(comptime T: type) type {
 fn opt(comptime parser: Parser([]const u8)) Parser([]const u8) {
     return struct {
         fn func(str: []const u8) ParseError!Parsed([]const u8) {
-            return opt(parser)(str);
+            return parser(str) catch .{ "", str };
         }
     }.func;
 }
@@ -178,7 +178,7 @@ pub const JsonParser = struct {
 
         const token_start, rest = try chain(.{ ws, stringLiteralParser("["), ws })(rest);
 
-        _, rest = try all(chain(.{ toStringParser(Json, parseJson), comma }))(rest);
+        _, rest = opt(all(chain(.{ toStringParser(Json, parseJson), comma })))(rest) catch unreachable;
         _, rest = opt(toStringParser(Json, parseJson))(rest) catch unreachable;
 
         _, rest = try chain(.{ ws, stringLiteralParser("]"), ws })(rest);
